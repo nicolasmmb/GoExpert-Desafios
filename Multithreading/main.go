@@ -1,36 +1,73 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	md "local/models"
+	"log"
 	"net/http"
+	"os"
 	"time"
 )
 
-func fetchFromAPI(apiURL string, cep string, ch chan<- string) {
-	start := time.Now()
+func fetchFromAPI[C md.RequestType](url string, ch chan md.RequestDTO) {
+	var data C
+	var err error
+
 	client := &http.Client{Timeout: 1 * time.Second}
-	resp, err := client.Get(apiURL + cep + ".json")
+	resp, err := client.Get(url)
+
 	if err != nil {
-		ch <- fmt.Sprintf("Erro na API %s: %v", apiURL, err)
+		log.Default().Println("Erro ao consultar API: ", url, " - Erro:", err)
 		return
 	}
+
+	if resp.StatusCode != 200 {
+		log.Default().Println("Erro ao consultar API: ", url, " - Status:", resp.Status)
+		return
+	}
+
 	defer resp.Body.Close()
 
-	elapsed := time.Since(start)
-	ch <- fmt.Sprintf("API %s: Tempo de resposta: %v", apiURL, elapsed)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Default().Println("Erro ao ler resposta da API: ", url, " - Erro:", err)
+		return
+	}
+	err = json.Unmarshal(body, &data)
+
+	if err != nil {
+		log.Default().Println("Erro ao converter resposta da API: ", url, " - Erro:", err)
+		return
+	}
+
+	ch <- md.NewRequestDTO(url, data.GetCode(), data.GetCity(), data.GetState())
+
 }
 
 func main() {
-	cep := "12460000" // Substitua pelo CEP desejado
-	ch := make(chan string, 2)
+	// read from command line arguments or use default
 
-	go fetchFromAPI("https://cdn.apicep.com/file/apicep/", cep, ch)
-	go fetchFromAPI("http://viacep.com.br/ws/", cep, ch)
+	var cep string
+	if len(os.Args) < 2 {
+		cep = "12460-000"
+	} else {
+		cep = os.Args[1]
+	}
+
+	ch := make(chan md.RequestDTO, 2)
+
+	urlViaCEP := fmt.Sprintf("http://viacep.com.br/ws/%s/json", cep)
+	urlAPICEP := fmt.Sprintf("https://cdn.apicep.com/file/apicep/%s.json", cep)
+
+	go fetchFromAPI[md.RequestViaCEP](urlViaCEP, ch)
+	go fetchFromAPI[md.RequestAPICEP](urlAPICEP, ch)
 
 	select {
 	case result := <-ch:
-		fmt.Println(result)
-		<-ch // Descartar a outra resposta
+		println(result.String())
+
 	case <-time.After(1 * time.Second):
 		fmt.Println("Tempo limite excedido para ambas as APIs.")
 	}
