@@ -6,7 +6,7 @@ build:
 	@chmod +x ./bin/main.bin
 
 run:
-	@./bin/server.bin
+	@./bin/main.bin
 
 clean:
 	@rm -rf ./bin/*
